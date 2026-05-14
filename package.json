@@ -7,12 +7,15 @@
   "exports": "./src/index.js",
   "files": [
     "src",
+    "scripts",
     "README-zh.md",
     "vibeguard.config.json.example"
   ],
   "scripts": {
     "test": "node --test",
-    "prepack": "npm test"
+    "prepack": "npm test",
+    "postinstall": "node scripts/download-model.js",
+    "download-model": "node scripts/download-model.js"
   },
   "optionalDependencies": {
     "@huggingface/transformers": "^4.2.0"

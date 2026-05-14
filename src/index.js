@@ -18,9 +18,21 @@ export const VibeGuardPrivacy = async (ctx) => {
   const config = await loadConfig(ctx.directory)
   const debug = Boolean(process.env.OPENCODE_VIBEGUARD_DEBUG) || Boolean(config.debug)
 
+  // Use OpenCode's structured logging instead of console.log to avoid
+  // corrupting the TUI. Falls back to no-op if client.app.log is unavailable.
+  const log = (level, message, extra) => {
+    try {
+      ctx.client?.app?.log({
+        body: { service: "vibeguard", level, message, ...(extra ? { extra } : {}) },
+      })
+    } catch {
+      /* swallow — never crash the plugin over logging */
+    }
+  }
+
   if (debug) {
     const from = config.loadedFrom ? config.loadedFrom : "not found (plugin will no-op)"
-    console.log(`[vibeguard] Config: ${from} enabled=${config.enabled}`)
+    log("debug", `Config: ${from} enabled=${config.enabled}`)
   }
 
   if (!config.enabled) return {}
@@ -33,19 +45,13 @@ export const VibeGuardPrivacy = async (ctx) => {
   // Check AI availability at startup (non-blocking info)
   // Import ai-detect lazily to avoid pulling in Transformers.js when AI disabled
   if (useAI) {
-    const { isAIAvailable, disposeAI } = await import("./ai-detect.js")
+    const { isAIAvailable, disposeAI, setLogger } = await import("./ai-detect.js")
+    setLogger(log)
     const available = await isAIAvailable()
     if (available) {
-      console.log(
-        `[vibeguard] AI detection enabled (model: ${aiConfig.model}, dtype: ${aiConfig.dtype}). ` +
-          `Model will be downloaded on first use if not cached.`
-      )
+      log("info", `AI detection enabled (model: ${aiConfig.model}, dtype: ${aiConfig.dtype}). Model will be downloaded on first use if not cached.`)
     } else {
-      console.log(
-        `[vibeguard] AI detection enabled in config but @huggingface/transformers is not installed. ` +
-          `Install with: npm i @huggingface/transformers\n` +
-          `Falling back to regex/keyword detection only.`
-      )
+      log("warn", "AI detection enabled in config but @huggingface/transformers is not installed. Falling back to regex/keyword detection only.")
     }
 
     // Clean up model pipeline on process exit to free memory
@@ -58,10 +64,8 @@ export const VibeGuardPrivacy = async (ctx) => {
   }
 
   if (debug) {
-    console.log(`[vibeguard] AI detection: ${useAI ? "enabled" : "disabled (opt-in via config)"}`)
-    console.log(
-      `[vibeguard] Regex patterns: ${patterns.keywords.length} keywords, ${patterns.regex.length} regex rules`
-    )
+    log("debug", `AI detection: ${useAI ? "enabled" : "disabled (opt-in via config)"}`)
+    log("debug", `Regex patterns: ${patterns.keywords.length} keywords, ${patterns.regex.length} regex rules`)
   }
 
   const getSession = (sessionID) => {
@@ -165,9 +169,7 @@ export const VibeGuardPrivacy = async (ctx) => {
       }
 
       if (debug && changedTextParts > 0) {
-        console.log(
-          `[vibeguard] Pre-request redaction: modified ${changedTextParts} text segment(s)`
-        )
+        log("debug", `Pre-request redaction: modified ${changedTextParts} text segment(s)`)
       }
     },
 
@@ -181,7 +183,7 @@ export const VibeGuardPrivacy = async (ctx) => {
       const after = restoreText(before, session)
       output.text = after
       if (debug && after !== before) {
-        console.log("[vibeguard] Post-response restore: modified 1 text segment")
+        log("debug", "Post-response restore: modified 1 text segment")
       }
     },
 

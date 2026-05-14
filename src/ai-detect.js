@@ -31,6 +31,17 @@ let _loading = null
 let _transformersModule = undefined // undefined = not yet checked
 let _transformersImportFailed = false // true = last import() threw
 let _pipelineFailedAt = 0 // timestamp of last pipeline failure (0 = never)
+let _cooldownLogged = false // true = already logged "on cooldown" once
+let _log = () => {} // no-op default; index.js sets this via setLogger()
+
+/**
+ * Set the logger function for ai-detect.
+ * Called once from index.js with the client.app.log wrapper.
+ * @param {Function} logFn - (level, message) => void
+ */
+export function setLogger(logFn) {
+  if (typeof logFn === "function") _log = logFn
+}
 
 /**
  * Attempt to import @huggingface/transformers.
@@ -73,24 +84,25 @@ async function getPipeline(aiConfig, debug) {
   if (_pipelineFailedAt > 0) {
     const elapsed = Date.now() - _pipelineFailedAt
     if (elapsed < RETRY_COOLDOWN_MS) {
-      if (debug) {
+      // Log once, not on every call — avoids flooding the terminal
+      if (debug && !_cooldownLogged) {
         const remaining = Math.ceil((RETRY_COOLDOWN_MS - elapsed) / 1000)
-        console.log(`[vibeguard] AI model load on cooldown (${remaining}s remaining), skipping`)
+        _log("debug", `AI model failed to load, cooldown ${remaining}s. Using regex-only.`)
+        _cooldownLogged = true
       }
       return null
     }
     // Cooldown expired — allow retry
     _pipelineFailedAt = 0
+    _cooldownLogged = false
   }
 
   _loading = (async () => {
     const transformers = await loadTransformers()
     if (!transformers) {
+      // Only log during initial load, not on cooldown retries
       if (debug) {
-        console.log(
-          "[vibeguard] AI detection unavailable: @huggingface/transformers not installed. " +
-            "Install with: npm i @huggingface/transformers"
-        )
+        _log("warn", "AI detection unavailable: @huggingface/transformers not installed.")
       }
       return null
     }
@@ -101,9 +113,7 @@ async function getPipeline(aiConfig, debug) {
     const timeoutMs = aiConfig.timeoutMs || MODEL_LOAD_TIMEOUT_MS
 
     if (debug) {
-      console.log(
-        `[vibeguard] Loading AI model: ${model} (dtype=${dtype}, device=${device}, timeout=${timeoutMs}ms)`
-      )
+      _log("info", `Loading AI model: ${model} (dtype=${dtype}, device=${device})`)
     }
 
     try {
@@ -123,13 +133,13 @@ async function getPipeline(aiConfig, debug) {
       _pipeline = await Promise.race([loadPromise, timeoutPromise])
 
       if (debug) {
-        console.log("[vibeguard] AI model loaded successfully")
+        _log("info", "AI model loaded successfully")
       }
       _pipelineFailedAt = 0
       return _pipeline
     } catch (err) {
       if (debug || !aiConfig.silentFallback) {
-        console.log(`[vibeguard] Failed to load AI model: ${err.message}`)
+        _log("error", `Failed to load AI model: ${err.message}`)
       }
       _pipeline = null
       _pipelineFailedAt = Date.now()
@@ -191,15 +201,13 @@ export async function detectWithAI(text, aiConfig, debug) {
     }
 
     if (debug && spans.length > 0) {
-      console.log(
-        `[vibeguard] AI detected ${spans.length} span(s): ${spans.map((s) => s.category).join(", ")}`
-      )
+      _log("debug", `AI detected ${spans.length} span(s): ${spans.map((s) => s.category).join(", ")}`)
     }
 
     return spans
   } catch (err) {
     if (!aiConfig.silentFallback || debug) {
-      console.log(`[vibeguard] AI inference error: ${err.message}, falling back to regex-only`)
+      _log("error", `AI inference error: ${err.message}, falling back to regex-only`)
     }
     return []
   }
