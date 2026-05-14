@@ -4,7 +4,6 @@ import { PlaceholderSession } from "./session.js"
 import { redactText, redactTextWithAI } from "./engine.js"
 import { redactDeep, restoreDeep } from "./deep.js"
 import { restoreText } from "./restore.js"
-import { isAIAvailable } from "./ai-detect.js"
 
 /**
  * OpenCode plugin entry point:
@@ -32,7 +31,9 @@ export const VibeGuardPrivacy = async (ctx) => {
   const useAI = aiConfig.enabled
 
   // Check AI availability at startup (non-blocking info)
+  // Import ai-detect lazily to avoid pulling in Transformers.js when AI disabled
   if (useAI) {
+    const { isAIAvailable, disposeAI } = await import("./ai-detect.js")
     const available = await isAIAvailable()
     if (available) {
       console.log(
@@ -46,6 +47,14 @@ export const VibeGuardPrivacy = async (ctx) => {
           `Falling back to regex/keyword detection only.`
       )
     }
+
+    // Clean up model pipeline on process exit to free memory
+    const onExit = () => {
+      disposeAI().catch(() => {})
+    }
+    process.on("exit", onExit)
+    process.on("SIGINT", onExit)
+    process.on("SIGTERM", onExit)
   }
 
   if (debug) {

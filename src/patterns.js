@@ -90,8 +90,9 @@ const BUILTIN = new Map([
   [
     "phone_us",
     {
-      // US phone: (555) 123-4567, 555-123-4567, +1-555-123-4567, etc.
-      pattern: String.raw`(?<!\d)(?:\+?1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}(?!\d)`,
+      // US phone: (555) 123-4567, 555-123-4567, +1-555-123-4567
+      // Requires at least one separator or parenthesized area code to avoid matching bare digit sequences
+      pattern: String.raw`(?<!\d)(?:\+?1[-.\s])?\(\d{3}\)[-.\s]?\d{3}[-.\s]?\d{4}(?!\d)|(?<!\d)(?:\+?1[-.\s])?\d{3}[-.\s]\d{3}[-.\s]?\d{4}(?!\d)`,
       flags: "",
       category: "PHONE_US",
     },
@@ -99,8 +100,10 @@ const BUILTIN = new Map([
   [
     "phone_intl",
     {
-      // International E.164-style: +44 20 7946 0958, +49-30-1234567, etc.
-      pattern: String.raw`(?<!\d)\+[1-9]\d{1,2}[-.\s]?\d[\d\-.\s]{6,14}\d(?!\d)`,
+      // International: +44 20 7946 0958, +49-30-1234567, +33 1 23 45 67 89
+      // Requires + prefix, country code 1-3 digits, then 7-14 additional digits with separators
+      // Must contain at least one separator to avoid matching arbitrary digit strings
+      pattern: String.raw`(?<!\d)\+[1-9]\d{0,2}[-.\s]\d(?:[-.\s]?\d){6,13}(?!\d)`,
       flags: "",
       category: "PHONE_INTL",
     },
@@ -117,8 +120,9 @@ const BUILTIN = new Map([
   [
     "credit_card",
     {
-      // Major credit card patterns (Visa, MC, Amex, Discover) with optional separators
-      pattern: String.raw`(?<!\d)(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}(?!\d)`,
+      // Visa (4xxx), MC (51-55xx), Discover (6011/65xx): 16 digits with optional separators
+      // Amex (34xx/37xx): 15 digits (4-6-5 grouping)
+      pattern: String.raw`(?<!\d)(?:(?:4\d{3}|5[1-5]\d{2}|6(?:011|5\d{2}))[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}|3[47]\d{2}[-\s]?\d{6}[-\s]?\d{5})(?!\d)`,
       flags: "",
       category: "CREDIT_CARD",
     },
@@ -126,7 +130,8 @@ const BUILTIN = new Map([
   [
     "openai_key",
     {
-      pattern: String.raw`sk-[A-Za-z0-9]{20,}T3BlbkFJ[A-Za-z0-9]{20,}`,
+      // OpenAI API keys: legacy sk-...T3BlbkFJ... and new sk-proj-... formats
+      pattern: String.raw`sk-(?:proj-)?[A-Za-z0-9_-]{20,}`,
       flags: "",
       category: "OPENAI_KEY",
     },

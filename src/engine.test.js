@@ -83,6 +83,14 @@ describe("new builtin patterns", () => {
     assert.ok(result.text.includes("__VG_CREDIT_CARD_"))
   })
 
+  it("redacts Amex credit card numbers (15 digits)", () => {
+    const patterns = buildPatternSet({ builtin: ["credit_card"] })
+    const session = new PlaceholderSession({ prefix: "__VG_" })
+    const result = redactText("Amex: 3782 822463 10005", patterns, session)
+    assert.ok(!result.text.includes("3782 822463 10005"))
+    assert.ok(result.text.includes("__VG_CREDIT_CARD_"))
+  })
+
   it("redacts private key headers", () => {
     const patterns = buildPatternSet({ builtin: ["private_key_header"] })
     const session = new PlaceholderSession({ prefix: "__VG_" })
@@ -106,14 +114,32 @@ describe("new builtin patterns", () => {
     assert.ok(!result.text.includes("eyJhbGciOiJIUzI1NiJ9"))
     assert.ok(result.text.includes("__VG_BEARER_TOKEN_"))
   })
+
+  it("redacts new-format OpenAI keys (sk-proj-)", () => {
+    const patterns = buildPatternSet({ builtin: ["openai_key"] })
+    const session = new PlaceholderSession({ prefix: "__VG_" })
+    const result = redactText("key: sk-proj-abcdefghij1234567890klmnopqr", patterns, session)
+    assert.ok(!result.text.includes("sk-proj-abcdefghij1234567890klmnopqr"))
+    assert.ok(result.text.includes("__VG_OPENAI_KEY_"))
+  })
+
+  it("does not false-positive phone_us on bare digit sequences", () => {
+    const patterns = buildPatternSet({ builtin: ["phone_us"] })
+    const session = new PlaceholderSession({ prefix: "__VG_" })
+    // Timestamp-like and ID-like digit strings should NOT match
+    const result = redactText("timestamp: 1715000000000 and id: 9876543", patterns, session)
+    assert.equal(result.matches.length, 0, "bare digits should not match phone_us")
+  })
 })
 
 describe("redactTextWithAI (graceful fallback)", () => {
-  it("falls back to regex-only when AI is unavailable", async () => {
+  // Stub that simulates AI being unavailable (returns no spans)
+  const noopDetect = async () => []
+
+  it("falls back to regex-only when AI returns no spans", async () => {
     const patterns = buildPatternSet({ builtin: ["email"] })
     const session = new PlaceholderSession({ prefix: "__VG_" })
 
-    // AI enabled but transformers not installed in test env = silent fallback
     const aiConfig = {
       enabled: true,
       model: "openai/privacy-filter",
@@ -128,7 +154,8 @@ describe("redactTextWithAI (graceful fallback)", () => {
       patterns,
       session,
       aiConfig,
-      false
+      false,
+      noopDetect // inject stub — avoids real model download
     )
 
     // Email should be redacted by regex even when AI is unavailable
@@ -138,12 +165,40 @@ describe("redactTextWithAI (graceful fallback)", () => {
     assert.ok(result.text.includes("Alice Smith"))
   })
 
+  it("merges AI spans with regex spans", async () => {
+    const patterns = buildPatternSet({ builtin: ["email"] })
+    const session = new PlaceholderSession({ prefix: "__VG_" })
+
+    const aiConfig = {
+      enabled: true,
+      model: "openai/privacy-filter",
+      dtype: "q4",
+      device: "cpu",
+      categories: [],
+      silentFallback: true,
+    }
+
+    // Simulate AI detecting "Alice Smith" as a person name
+    const input = "Email alice@corp.io from Alice Smith"
+    const nameStart = input.indexOf("Alice Smith")
+    const fakeDetect = async () => [
+      { start: nameStart, end: nameStart + 11, original: "Alice Smith", category: "PRIVATE_PERSON" },
+    ]
+
+    const result = await redactTextWithAI(input, patterns, session, aiConfig, false, fakeDetect)
+
+    assert.ok(!result.text.includes("alice@corp.io"), "email should be redacted by regex")
+    assert.ok(!result.text.includes("Alice Smith"), "name should be redacted by AI")
+    assert.ok(result.text.includes("__VG_EMAIL_"))
+    assert.ok(result.text.includes("__VG_PRIVATE_PERSON_"))
+  })
+
   it("handles empty text", async () => {
     const patterns = buildPatternSet({ builtin: ["email"] })
     const session = new PlaceholderSession({ prefix: "__VG_" })
     const aiConfig = { enabled: true, model: "openai/privacy-filter", dtype: "q4", device: "cpu", categories: [], silentFallback: true }
 
-    const result = await redactTextWithAI("", patterns, session, aiConfig, false)
+    const result = await redactTextWithAI("", patterns, session, aiConfig, false, noopDetect)
     assert.equal(result.text, "")
     assert.equal(result.matches.length, 0)
   })
@@ -184,15 +239,32 @@ describe("restoreText", () => {
 describe("config normalizeAiConfig", async () => {
   // Import config module to test normalization
   const { loadConfig } = await import("./config.js")
+  const { writeFileSync, unlinkSync, mkdirSync } = await import("node:fs")
+  const { join } = await import("node:path")
 
   it("defaults ai to disabled", async () => {
-    // loadConfig with a non-existent dir returns enabled=false
-    const cfg = await loadConfig("/nonexistent-dir-for-test-" + Date.now())
-    assert.equal(cfg.ai.enabled, false)
-    assert.equal(cfg.ai.model, "openai/privacy-filter")
-    assert.equal(cfg.ai.dtype, "q4")
-    assert.equal(cfg.ai.device, "cpu")
-    assert.equal(cfg.ai.silentFallback, true)
-    assert.deepEqual(cfg.ai.categories, [])
+    // Create a minimal config with enabled=false to override the real one.
+    // The env override is added to the candidate list but global config still
+    // gets checked too, so we provide a real file that wins first.
+    const tmpDir = `/tmp/vibeguard-test-${Date.now()}`
+    mkdirSync(tmpDir, { recursive: true })
+    const tmpCfg = join(tmpDir, "vibeguard.config.json")
+    writeFileSync(tmpCfg, JSON.stringify({ enabled: false }), "utf8")
+
+    const prev = process.env.OPENCODE_VIBEGUARD_CONFIG
+    process.env.OPENCODE_VIBEGUARD_CONFIG = tmpCfg
+    try {
+      const cfg = await loadConfig(tmpDir)
+      assert.equal(cfg.ai.enabled, false)
+      assert.equal(cfg.ai.model, "openai/privacy-filter")
+      assert.equal(cfg.ai.dtype, "q4")
+      assert.equal(cfg.ai.device, "cpu")
+      assert.equal(cfg.ai.silentFallback, true)
+      assert.deepEqual(cfg.ai.categories, [])
+    } finally {
+      if (prev === undefined) delete process.env.OPENCODE_VIBEGUARD_CONFIG
+      else process.env.OPENCODE_VIBEGUARD_CONFIG = prev
+      try { unlinkSync(tmpCfg) } catch {}
+    }
   })
 })

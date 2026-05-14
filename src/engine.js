@@ -1,4 +1,6 @@
-import { detectWithAI } from "./ai-detect.js"
+// ai-detect.js is imported lazily in redactTextWithAI() to avoid pulling in
+// Transformers.js infrastructure when AI detection is disabled.
+let _detectWithAI = null
 
 function subtractCovered(start, end, covered) {
   if (start >= end) return []
@@ -140,8 +142,15 @@ export function redactText(input, patterns, session) {
  * Redact text using both regex/keyword patterns AND the AI Privacy Filter.
  * Async because the AI inference is async. The hook awaits this before
  * proceeding, so redaction is guaranteed complete before the LLM sees the text.
+ *
+ * @param {string} input
+ * @param {object} patterns
+ * @param {object} session
+ * @param {object} aiConfig
+ * @param {boolean} debug
+ * @param {Function} [_detectFn] - Optional override for detectWithAI (testing only)
  */
-export async function redactTextWithAI(input, patterns, session, aiConfig, debug) {
+export async function redactTextWithAI(input, patterns, session, aiConfig, debug, _detectFn) {
   const text = String(input ?? "")
   if (!text) return { text, matches: [] }
 
@@ -149,11 +158,21 @@ export async function redactTextWithAI(input, patterns, session, aiConfig, debug
   const found = findRegexSpans(text, patterns)
 
   // 2. AI-based detection (async, local model inference)
-  const aiSpans = await detectWithAI(text, aiConfig, debug)
+  const detect = _detectFn ?? await getDetectWithAI()
+  const aiSpans = await detect(text, aiConfig, debug)
   for (const span of aiSpans) {
     if (patterns.exclude.has(span.original)) continue
     found.push(span)
   }
 
   return applySpans(text, found, session)
+}
+
+/** Lazily resolve the real detectWithAI function from ai-detect.js */
+async function getDetectWithAI() {
+  if (!_detectWithAI) {
+    const mod = await import("./ai-detect.js")
+    _detectWithAI = mod.detectWithAI
+  }
+  return _detectWithAI
 }
