@@ -1,3 +1,5 @@
+import { detectWithAI } from "./ai-detect.js"
+
 function subtractCovered(start, end, covered) {
   if (start >= end) return []
   const out = []
@@ -42,16 +44,10 @@ function insertCovered(covered, span) {
 }
 
 /**
- * 对输入文本进行脱敏替换，返回替换后的文本与命中信息。
- * 设计与 VibeGuard 的 redact 引擎一致：处理重叠命中，确保不会把占位符切碎。
- * @param {string} input
- * @param {{ keywords: Array<{value:string,category:string}>, regex: Array<{pattern:string,flags:string,category:string}>, exclude: Set<string> }} patterns
- * @param {{ getOrCreatePlaceholder(original: string, category: string): string }} session
+ * Collect regex/keyword spans from the given text (synchronous, fast).
+ * Shared by both redactText and redactTextWithAI.
  */
-export function redactText(input, patterns, session) {
-  const text = String(input ?? "")
-  if (!text) return { text, matches: [] }
-
+function findRegexSpans(text, patterns) {
   const found = []
 
   for (const rule of patterns.keywords) {
@@ -85,9 +81,17 @@ export function redactText(input, patterns, session) {
     }
   }
 
+  return found
+}
+
+/**
+ * Given a set of found spans, resolve overlaps and apply placeholder replacements.
+ * Shared by both sync and async redaction paths.
+ */
+function applySpans(text, found, session) {
   if (found.length === 0) return { text, matches: [] }
 
-  // 右侧优先；同起点优先更长，便于把左侧大范围命中拆掉
+  // Right-first; same start -> prefer longer span
   found.sort((a, b) => {
     if (a.start !== b.start) return b.start - a.start
     return b.end - a.end
@@ -121,3 +125,35 @@ export function redactText(input, patterns, session) {
   return { text: out, matches: planned }
 }
 
+/**
+ * Redact text using regex/keyword patterns only (synchronous, fast).
+ * Returns { text, matches }.
+ */
+export function redactText(input, patterns, session) {
+  const text = String(input ?? "")
+  if (!text) return { text, matches: [] }
+  const found = findRegexSpans(text, patterns)
+  return applySpans(text, found, session)
+}
+
+/**
+ * Redact text using both regex/keyword patterns AND the AI Privacy Filter.
+ * Async because the AI inference is async. The hook awaits this before
+ * proceeding, so redaction is guaranteed complete before the LLM sees the text.
+ */
+export async function redactTextWithAI(input, patterns, session, aiConfig, debug) {
+  const text = String(input ?? "")
+  if (!text) return { text, matches: [] }
+
+  // 1. Regex/keyword detection (fast, synchronous)
+  const found = findRegexSpans(text, patterns)
+
+  // 2. AI-based detection (async, local model inference)
+  const aiSpans = await detectWithAI(text, aiConfig, debug)
+  for (const span of aiSpans) {
+    if (patterns.exclude.has(span.original)) continue
+    found.push(span)
+  }
+
+  return applySpans(text, found, session)
+}

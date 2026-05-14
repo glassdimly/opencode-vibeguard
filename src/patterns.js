@@ -34,8 +34,8 @@ function peelInlineFlags(pattern, flags) {
 }
 
 /**
- * 内置规则：从 VibeGuard 的 builtin 规则移植（做了 JS 兼容调整）。
- * 目标是“低配置成本 + 尽量覆盖”，不追求 100% 精准。
+ * Builtin detection rules (ported from VibeGuard with JS compatibility).
+ * Goal: low config cost + broad coverage, not 100% precision.
  */
 const BUILTIN = new Map([
   [
@@ -49,7 +49,6 @@ const BUILTIN = new Map([
   [
     "china_phone",
     {
-      // 直接匹配手机号本体（用 lookaround 替代 Go 里的捕获组边界保留写法）
       pattern: String.raw`(?<!\d)1[3-9]\d{9}(?!\d)`,
       flags: "",
       category: "CHINA_PHONE",
@@ -74,7 +73,6 @@ const BUILTIN = new Map([
   [
     "ipv4",
     {
-      // 不校验每段 0-255；目标是覆盖常见情况
       pattern: String.raw`(?:\d{1,3}\.){3}\d{1,3}`,
       flags: "",
       category: "IPV4",
@@ -86,6 +84,93 @@ const BUILTIN = new Map([
       pattern: String.raw`(?:[0-9a-f]{2}:){5}[0-9a-f]{2}`,
       flags: "i",
       category: "MAC",
+    },
+  ],
+  // --- Additional builtins ---
+  [
+    "phone_us",
+    {
+      // US phone: (555) 123-4567, 555-123-4567, +1-555-123-4567, etc.
+      pattern: String.raw`(?<!\d)(?:\+?1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}(?!\d)`,
+      flags: "",
+      category: "PHONE_US",
+    },
+  ],
+  [
+    "phone_intl",
+    {
+      // International E.164-style: +44 20 7946 0958, +49-30-1234567, etc.
+      pattern: String.raw`(?<!\d)\+[1-9]\d{1,2}[-.\s]?\d[\d\-.\s]{6,14}\d(?!\d)`,
+      flags: "",
+      category: "PHONE_INTL",
+    },
+  ],
+  [
+    "ssn",
+    {
+      // US Social Security Number: 123-45-6789
+      pattern: String.raw`(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)`,
+      flags: "",
+      category: "SSN",
+    },
+  ],
+  [
+    "credit_card",
+    {
+      // Major credit card patterns (Visa, MC, Amex, Discover) with optional separators
+      pattern: String.raw`(?<!\d)(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}(?!\d)`,
+      flags: "",
+      category: "CREDIT_CARD",
+    },
+  ],
+  [
+    "openai_key",
+    {
+      pattern: String.raw`sk-[A-Za-z0-9]{20,}T3BlbkFJ[A-Za-z0-9]{20,}`,
+      flags: "",
+      category: "OPENAI_KEY",
+    },
+  ],
+  [
+    "github_token",
+    {
+      pattern: String.raw`(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}`,
+      flags: "",
+      category: "GITHUB_TOKEN",
+    },
+  ],
+  [
+    "aws_access_key",
+    {
+      pattern: String.raw`AKIA[0-9A-Z]{16}`,
+      flags: "",
+      category: "AWS_ACCESS_KEY",
+    },
+  ],
+  [
+    "vault_token",
+    {
+      // HashiCorp Vault tokens: hvs.xxxxx or s.xxxxx
+      pattern: String.raw`(?:hvs|s)\.[A-Za-z0-9]{24,}`,
+      flags: "",
+      category: "VAULT_TOKEN",
+    },
+  ],
+  [
+    "private_key_header",
+    {
+      pattern: String.raw`-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----`,
+      flags: "",
+      category: "PRIVATE_KEY",
+    },
+  ],
+  [
+    "generic_bearer",
+    {
+      // Bearer tokens in Authorization headers
+      pattern: String.raw`Bearer\s+[A-Za-z0-9\-._~+/]+=*`,
+      flags: "i",
+      category: "BEARER_TOKEN",
     },
   ],
 ])

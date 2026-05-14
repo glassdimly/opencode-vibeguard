@@ -14,6 +14,9 @@
     "test": "node --test",
     "prepack": "npm test"
   },
+  "optionalDependencies": {
+    "@huggingface/transformers": "^4.2.0"
+  },
   "keywords": [
     "opencode",
     "opencode-plugin",
@@ -21,7 +24,9 @@
     "privacy",
     "redaction",
     "secrets",
-    "pii"
+    "pii",
+    "privacy-filter",
+    "ai"
   ],
   "repository": {
     "type": "git",
