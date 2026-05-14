@@ -45,7 +45,7 @@ export const VibeGuardPrivacy = async (ctx) => {
   // Check AI availability at startup (non-blocking info)
   // Import ai-detect lazily to avoid pulling in Transformers.js when AI disabled
   if (useAI) {
-    const { isAIAvailable, disposeAI, setLogger } = await import("./ai-detect.js")
+    const { isAIAvailable, setLogger } = await import("./ai-detect.js")
     setLogger(log)
     const available = await isAIAvailable()
     if (available) {
@@ -53,14 +53,9 @@ export const VibeGuardPrivacy = async (ctx) => {
     } else {
       log("warn", "AI detection enabled in config but @huggingface/transformers is not installed. Falling back to regex/keyword detection only.")
     }
-
-    // Clean up model pipeline on process exit to free memory
-    const onExit = () => {
-      disposeAI().catch(() => {})
-    }
-    process.on("exit", onExit)
-    process.on("SIGINT", onExit)
-    process.on("SIGTERM", onExit)
+    // NOTE: We intentionally do NOT register process exit handlers for disposeAI().
+    // The ONNX runtime (native N-API addon) crashes if dispose() is called during
+    // process teardown. The OS reclaims all memory on exit anyway.
   }
 
   if (debug) {
