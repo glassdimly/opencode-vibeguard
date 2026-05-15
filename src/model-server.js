@@ -70,13 +70,9 @@ function defaultSocketPath() {
 function log(msg) {
   const ts = new Date().toISOString()
   const line = `[${ts}] ${msg}\n`
+  // Write to stderr only — the spawner redirects stderr to the log file.
+  // appendFileSync was causing doubled lines when stderr was already redirected.
   process.stderr.write(line)
-  // Also append to log file for diagnostics when stdio is redirected
-  try {
-    fs.appendFileSync(LOG_PATH, line)
-  } catch {
-    /* best-effort */
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +101,11 @@ async function loadPipeline() {
     const start = Date.now()
     try {
       const transformers = await import("@huggingface/transformers")
+      // Limit ONNX WASM thread count to prevent CPU-spinning when idle.
+      // Default uses all cores, which causes ~100% CPU even between requests.
+      if (transformers.env?.backends?.onnx?.wasm) {
+        transformers.env.backends.onnx.wasm.numThreads = 2
+      }
       _pipeline = await transformers.pipeline("token-classification", MODEL, {
         dtype: DTYPE,
         device: DEVICE,
@@ -129,6 +130,7 @@ async function loadPipeline() {
 // Inference (serialized queue)
 // ---------------------------------------------------------------------------
 let _inferring = false
+let _requestCount = 0
 const _queue = []
 
 function enqueueInference(text, categories) {
@@ -224,9 +226,10 @@ async function runInference(text, categories) {
 }
 
 // ---------------------------------------------------------------------------
-// Idle timeout
+// Idle timeout + socket watchdog
 // ---------------------------------------------------------------------------
 let _idleTimer = null
+let _socketWatcher = null
 const startedAt = Date.now()
 
 function resetIdleTimer() {
@@ -237,6 +240,27 @@ function resetIdleTimer() {
   }, IDLE_TIMEOUT_MS)
   // Don't let the timer keep the process alive if everything else is done
   if (_idleTimer.unref) _idleTimer.unref()
+}
+
+/**
+ * Watch the socket file for deletion. If it disappears (another instance's
+ * cleanupStaleFiles, OS cleanup, manual rm), this server is orphaned and
+ * can never receive requests again — exit immediately.
+ * The client (ai-detect.js) will spawn a fresh server on next detect() call.
+ */
+function startSocketWatchdog() {
+  try {
+    _socketWatcher = fs.watch(path.dirname(SOCKET_PATH), (eventType, filename) => {
+      if (filename === path.basename(SOCKET_PATH) && !fs.existsSync(SOCKET_PATH)) {
+        log("Socket file deleted externally — exiting orphaned server.")
+        shutdown()
+      }
+    })
+    _socketWatcher.unref()
+  } catch {
+    // fs.watch not supported or dir doesn't exist — not fatal, idle timeout
+    // will still clean up eventually
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -259,6 +283,7 @@ const server = http.createServer(async (req, res) => {
         device: DEVICE,
         error: _loadError || undefined,
         queueLength: _queue.length,
+        requestCount: _requestCount,
       })
     )
     return
@@ -334,7 +359,9 @@ const server = http.createServer(async (req, res) => {
 
       try {
         // NEVER log text — it contains the sensitive data we're protecting
+        _requestCount++
         const spans = await enqueueInference(text, categories)
+        log(`detect #${_requestCount}: ${spans.length} span(s) found`)
         res.writeHead(200, { "Content-Type": "application/json" })
         res.end(JSON.stringify({ spans }))
       } catch (err) {
@@ -374,6 +401,7 @@ function cleanupFiles() {
 
 function shutdown() {
   if (_idleTimer) clearTimeout(_idleTimer)
+  if (_socketWatcher) { try { _socketWatcher.close() } catch { /* ok */ } }
   // Reject all queued jobs so their HTTP handlers can respond
   while (_queue.length > 0) {
     const job = _queue.shift()
@@ -381,7 +409,7 @@ function shutdown() {
   }
   server.close(() => {
     cleanupFiles()
-    log("Shutdown complete.")
+    log(`Shutdown complete. Served ${_requestCount} detect request(s).`)
     process.exit(0)
   })
   // Force exit if server.close hangs (non-zero = abnormal)
@@ -439,8 +467,9 @@ server.listen(SOCKET_PATH, () => {
   log(`Model: ${MODEL}, dtype: ${DTYPE}, device: ${DEVICE}`)
   log(`Idle timeout: ${IDLE_TIMEOUT_MS / 60_000}min`)
 
-  // Start idle timer
+  // Start idle timer + socket watchdog
   resetIdleTimer()
+  startSocketWatchdog()
 
   // Begin loading the model (async, non-blocking)
   loadPipeline()
