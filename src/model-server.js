@@ -101,14 +101,20 @@ async function loadPipeline() {
     const start = Date.now()
     try {
       const transformers = await import("@huggingface/transformers")
-      // Limit ONNX WASM thread count to prevent CPU-spinning when idle.
-      // Default uses all cores, which causes ~100% CPU even between requests.
+      // Limit thread count to prevent CPU-spinning when idle.
+      // onnxruntime-node uses native threads (not WASM), controlled via
+      // session_options. The wasm.numThreads setting alone does nothing
+      // for the native backend. Default is all CPU cores → 100%+ CPU idle.
       if (transformers.env?.backends?.onnx?.wasm) {
         transformers.env.backends.onnx.wasm.numThreads = 2
       }
       _pipeline = await transformers.pipeline("token-classification", MODEL, {
         dtype: DTYPE,
         device: DEVICE,
+        session_options: {
+          intraOpNumThreads: 2,
+          interOpNumThreads: 1,
+        },
       })
       const elapsed = ((Date.now() - start) / 1000).toFixed(1)
       log(`Model loaded successfully (${elapsed}s)`)
