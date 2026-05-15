@@ -17,7 +17,7 @@ import fs from "node:fs"
 import path from "node:path"
 import os from "node:os"
 import { fileURLToPath } from "node:url"
-import { spawn } from "node:child_process"
+import { spawn, execFileSync } from "node:child_process"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -211,6 +211,37 @@ function cleanupStaleFiles() {
 }
 
 /**
+ * Find a Node.js binary suitable for running the model server.
+ *
+ * process.execPath is NOT reliable — when running inside OpenCode (Bun),
+ * it points to the opencode binary, not Node. So we resolve explicitly:
+ *   1. $NODE_BIN env var (explicit override)
+ *   2. `which node` (PATH lookup)
+ *   3. process.execPath (last resort — only works if host IS Node)
+ */
+function findNodeBin() {
+  // Explicit override
+  if (process.env.NODE_BIN) return process.env.NODE_BIN
+
+  // PATH lookup — works for nvm, fnm, brew, system node
+  try {
+    const resolved = execFileSync("which", ["node"], {
+      encoding: "utf8",
+      timeout: 5000,
+    }).trim()
+    if (resolved && fs.existsSync(resolved)) return resolved
+  } catch { /* which failed — continue */ }
+
+  // Last resort: only valid if the host runtime IS Node (not Bun/Deno/opencode)
+  const execName = path.basename(process.execPath).toLowerCase()
+  if (execName === "node" || execName.startsWith("node")) {
+    return process.execPath
+  }
+
+  return null
+}
+
+/**
  * Spawn the model server as a detached background process.
  */
 function spawnServer(aiConfig) {
@@ -223,8 +254,11 @@ function spawnServer(aiConfig) {
   const dtype = aiConfig.dtype || "q4"
   const device = aiConfig.device || "cpu"
 
-  // Use the same Node binary that's running the current process
-  const nodeBin = process.execPath
+  const nodeBin = findNodeBin()
+  if (!nodeBin) {
+    _log("error", "Cannot find Node.js binary. Install Node.js or set NODE_BIN env var.")
+    return null
+  }
 
   const logPath = getLogPath()
   let logFd = null
@@ -265,7 +299,7 @@ function spawnServer(aiConfig) {
   if (logFd !== null) {
     try { fs.closeSync(logFd) } catch { /* ok */ }
   }
-  _log("info", `Spawned model server (pid=${child.pid}, model=${model}, dtype=${dtype})`)
+  _log("info", `Spawned model server (pid=${child.pid}, node=${nodeBin}, model=${model}, dtype=${dtype})`)
   return child.pid
 }
 
