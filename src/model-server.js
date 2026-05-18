@@ -79,6 +79,7 @@ function log(msg) {
 // Model loading (moved from ai-detect.js)
 // ---------------------------------------------------------------------------
 const LABEL_TO_CATEGORY = {
+  // openai/privacy-filter labels
   private_person: "PRIVATE_PERSON",
   private_address: "PRIVATE_ADDRESS",
   private_email: "PRIVATE_EMAIL",
@@ -87,6 +88,24 @@ const LABEL_TO_CATEGORY = {
   private_date: "PRIVATE_DATE",
   account_number: "ACCOUNT_NUMBER",
   secret: "SECRET",
+  // broadfield-dev/bert-small labels (BIO prefix already stripped)
+  email: "PRIVATE_EMAIL",
+  telephonenum: "PRIVATE_PHONE",
+  givenname: "PRIVATE_PERSON",
+  surname: "PRIVATE_PERSON",
+  username: "PRIVATE_PERSON",
+  street: "PRIVATE_ADDRESS",
+  city: "PRIVATE_ADDRESS",
+  buildingnum: "PRIVATE_ADDRESS",
+  zipcode: "PRIVATE_ADDRESS",
+  creditcardnumber: "ACCOUNT_NUMBER",
+  accountnum: "ACCOUNT_NUMBER",
+  socialnum: "ACCOUNT_NUMBER",
+  idcardnum: "ACCOUNT_NUMBER",
+  driverlicensenum: "ACCOUNT_NUMBER",
+  taxnum: "ACCOUNT_NUMBER",
+  dateofbirth: "PRIVATE_DATE",
+  password: "SECRET",
 }
 
 let _pipeline = null

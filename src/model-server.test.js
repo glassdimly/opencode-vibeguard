@@ -356,27 +356,97 @@ describe("model-server (AI integration)", { timeout: 300_000, skip: SKIP_AI }, (
   })
 
   // =========================================================================
+  // Detection breadth — verify the model catches diverse PII/secret types
+  // =========================================================================
+
+  describe("detection breadth", () => {
+    it("detects an arbitrary password string from context", async () => {
+      const text = "The database password is hunter2secretpass123"
+      const r = await detect(text)
+      assertDetected(spans(r), "hunter2secretpass123", "SECRET")
+    })
+
+    it("detects a random API key string", async () => {
+      const text = "Set API_KEY=xK9mP2vL8nQ4wR7yT3hB5cF6gJ1aD0eU in your env"
+      const r = await detect(text)
+      assertDetected(spans(r), "xK9mP2vL8nQ4wR7yT3hB5cF6gJ1aD0eU", "SECRET")
+    })
+
+    it("detects a full name", async () => {
+      const text = "Contact John Smith at the front desk"
+      const r = await detect(text)
+      assertDetected(spans(r), "John Smith", "PRIVATE_PERSON")
+    })
+
+    it("detects an email address", async () => {
+      const text = "Send results to john.smith@acme.corp for review"
+      const r = await detect(text)
+      assertDetected(spans(r), "john.smith@acme.corp", "PRIVATE_EMAIL")
+    })
+
+    it("detects a phone number", async () => {
+      const text = "Call me at 415-555-0198 after 5pm"
+      const r = await detect(text)
+      const s = spans(r)
+      assert.ok(
+        s.some((sp) => sp.category === "PRIVATE_PHONE" && sp.original.includes("415-555-0198")),
+        `Expected PRIVATE_PHONE with 415-555-0198, got: ${JSON.stringify(s)}`
+      )
+    })
+
+    it("detects a social security number", async () => {
+      const text = "SSN on file: 123-45-6789"
+      const r = await detect(text)
+      const s = spans(r)
+      assert.ok(
+        s.some((sp) => sp.category === "ACCOUNT_NUMBER"),
+        `Expected ACCOUNT_NUMBER for SSN, got: ${JSON.stringify(s)}`
+      )
+    })
+
+    it("detects a full street address", async () => {
+      const text = "Ship to 742 Evergreen Terrace, Springfield IL 62704"
+      const r = await detect(text)
+      const s = spans(r)
+      assert.ok(
+        s.some((sp) => sp.category === "PRIVATE_ADDRESS"),
+        `Expected PRIVATE_ADDRESS, got: ${JSON.stringify(s)}`
+      )
+    })
+
+    it("detects a credit card number", async () => {
+      const text = "Card on file: 4532 0151 2345 6789 exp 12/27"
+      const r = await detect(text)
+      const s = spans(r)
+      assert.ok(
+        s.some((sp) => sp.category === "ACCOUNT_NUMBER"),
+        `Expected ACCOUNT_NUMBER for credit card, got: ${JSON.stringify(s)}`
+      )
+    })
+
+    it("detects a connection string with embedded password", async () => {
+      const text = "MONGO_URI=mongodb://admin:p4ssw0rd@db.internal:27017/prod"
+      const r = await detect(text)
+      const s = spans(r)
+      assert.ok(s.length > 0, `Expected at least one detection for connection string, got: ${JSON.stringify(s)}`)
+    })
+
+    it("detects a date of birth", async () => {
+      const text = "Patient DOB: March 15, 1987"
+      const r = await detect(text)
+      const s = spans(r)
+      assert.ok(
+        s.some((sp) => sp.category === "PRIVATE_DATE"),
+        `Expected PRIVATE_DATE, got: ${JSON.stringify(s)}`
+      )
+    })
+  })
+
+  // =========================================================================
   // False-positive resistance
   // =========================================================================
 
   describe("false positive resistance", () => {
-    it("flags a UUID as SECRET (known model behavior — document, don't rely on)", async () => {
-      // The Privacy Filter model classifies UUIDs as secrets because they
-      // look like hex tokens. This is a known false-positive. We document
-      // the behavior here so we know if/when model updates fix it.
-      // In practice the regex layer does NOT match UUIDs, so the merged
-      // output only includes this if AI is active.
-      const text = "Request ID: 550e8400-e29b-41d4-a716-446655440000"
-      const r = await detect(text)
-      const s = spans(r)
-      // Current model behavior: flags the UUID.
-      // If a future model stops flagging it, update this test.
-      const hasUuidSpan = s.some(
-        (sp) => sp.original.includes("550e8400") && sp.category === "SECRET"
-      )
-      assert.ok(hasUuidSpan, "Current model flags UUIDs as SECRET (known false positive)")
-    })
-
     it("does NOT flag a semver version string", async () => {
       const text = "Upgraded @huggingface/transformers from 4.1.0 to 4.2.0"
       const r = await detect(text)
@@ -387,6 +457,12 @@ describe("model-server (AI integration)", { timeout: 300_000, skip: SKIP_AI }, (
       const text = "Dev server running at http://localhost:3000/api/v1/health"
       const r = await detect(text)
       assertNotDetected(spans(r), text, "http://localhost:3000")
+    })
+
+    it("does NOT flag common programming identifiers", async () => {
+      const text = "const userId = getUserById(req.params.id)"
+      const r = await detect(text)
+      assert.equal(spans(r).length, 0, `Expected no spans, got: ${JSON.stringify(r.body.spans)}`)
     })
   })
 
