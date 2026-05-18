@@ -3,12 +3,12 @@
 let _detectWithAI = null
 
 // ---------------------------------------------------------------------------
-// {{novg:...}} bypass markers
+// {{preserve:...}} bypass markers
 // ---------------------------------------------------------------------------
-const NOVG_RE = /\{\{novg:([\s\S]*?)\}\}/g
+const PRESERVE_RE = /\{\{preserve:([\s\S]*?)\}\}/g
 
 /**
- * Strip {{novg:...}} markers from text and return protected character ranges.
+ * Strip {{preserve:...}} markers from text and return protected character ranges.
  * The inner content is kept verbatim; only the markers are removed.
  * Returns { text: strippedText, protectedRanges: [{start, end}] }
  */
@@ -18,8 +18,8 @@ function stripProtectedZones(input) {
   let lastEnd = 0
   let offset = 0 // tracks how much shorter `out` is vs `input`
 
-  NOVG_RE.lastIndex = 0
-  for (const m of input.matchAll(NOVG_RE)) {
+  PRESERVE_RE.lastIndex = 0
+  for (const m of input.matchAll(PRESERVE_RE)) {
     const matchStart = m.index
     const inner = m[1]
     // Copy text before this marker
@@ -176,7 +176,7 @@ function applySpans(text, found, session) {
 
 /**
  * Redact text using regex/keyword patterns only (synchronous, fast).
- * Supports {{novg:...}} bypass markers — wrapped content is never redacted.
+ * Supports {{preserve:...}} bypass markers — wrapped content is never redacted.
  * Returns { text, matches }.
  */
 export function redactText(input, patterns, session) {
@@ -201,7 +201,7 @@ export function redactText(input, patterns, session) {
  * Redact text using both regex/keyword patterns AND the AI Privacy Filter.
  * Async because the AI inference is async. The hook awaits this before
  * proceeding, so redaction is guaranteed complete before the LLM sees the text.
- * Supports {{novg:...}} bypass markers — wrapped content is never redacted.
+ * Supports {{preserve:...}} bypass markers — wrapped content is never redacted.
  *
  * @param {string} input
  * @param {object} patterns

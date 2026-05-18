@@ -236,22 +236,22 @@ describe("restoreText", () => {
   })
 })
 
-describe("{{novg:...}} bypass markers", () => {
-  it("does not redact content inside {{novg:...}}", () => {
+describe("{{preserve:...}} bypass markers", () => {
+  it("does not redact content inside {{preserve:...}}", () => {
     const patterns = buildPatternSet({ builtin: ["email", "github_token"] })
     const session = new PlaceholderSession({ prefix: "__VG_" })
-    const input = "Check {{novg:ghp_abc123def456abc123def456abc123def456ab}} now"
+    const input = "Check {{preserve:ghp_abc123def456abc123def456abc123def456ab}} now"
     const result = redactText(input, patterns, session)
     // Markers stripped, content preserved verbatim
     assert.ok(result.text.includes("ghp_abc123def456abc123def456abc123def456ab"), "protected content should not be redacted")
-    assert.ok(!result.text.includes("{{novg:"), "markers should be stripped")
+    assert.ok(!result.text.includes("{{preserve:"), "markers should be stripped")
     assert.equal(result.matches.length, 0)
   })
 
   it("still redacts unprotected content alongside protected content", () => {
     const patterns = buildPatternSet({ builtin: ["email", "github_token"] })
     const session = new PlaceholderSession({ prefix: "__VG_" })
-    const input = "Safe: {{novg:ghp_abc123def456abc123def456abc123def456ab}} Unsafe: user@example.org"
+    const input = "Safe: {{preserve:ghp_abc123def456abc123def456abc123def456ab}} Unsafe: user@example.org"
     const result = redactText(input, patterns, session)
     // Token is protected
     assert.ok(result.text.includes("ghp_abc123def456abc123def456abc123def456ab"))
@@ -263,7 +263,7 @@ describe("{{novg:...}} bypass markers", () => {
   it("handles multiple bypass markers", () => {
     const patterns = buildPatternSet({ builtin: ["email"] })
     const session = new PlaceholderSession({ prefix: "__VG_" })
-    const input = "A: {{novg:a@b.com}} B: {{novg:c@d.com}} C: x@y.com"
+    const input = "A: {{preserve:a@b.com}} B: {{preserve:c@d.com}} C: x@y.com"
     const result = redactText(input, patterns, session)
     assert.ok(result.text.includes("a@b.com"), "first protected email preserved")
     assert.ok(result.text.includes("c@d.com"), "second protected email preserved")
@@ -280,7 +280,7 @@ describe("{{novg:...}} bypass markers", () => {
       if (idx >= 0) return [{ start: idx, end: idx + 13, original: "safe@keep.com", category: "PRIVATE_EMAIL" }]
       return []
     }
-    const input = "Keep {{novg:safe@keep.com}} but redact other@leak.com"
+    const input = "Keep {{preserve:safe@keep.com}} but redact other@leak.com"
     const result = await redactTextWithAI(input, patterns, session, aiConfig, false, fakeDetect)
     assert.ok(result.text.includes("safe@keep.com"), "AI-detected span in protected zone should be filtered")
     assert.ok(!result.text.includes("other@leak.com"), "unprotected email should be redacted")
