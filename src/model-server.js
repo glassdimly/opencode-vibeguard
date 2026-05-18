@@ -282,6 +282,23 @@ function startSocketWatchdog() {
 }
 
 // ---------------------------------------------------------------------------
+// Memory watchdog — kill if RSS exceeds cap (ONNX runtime leaks over time)
+// ---------------------------------------------------------------------------
+const MAX_RSS_MB = parseInt(process.env.VIBEGUARD_MAX_RSS_MB || "1500", 10)
+let _memoryWatchdog = null
+
+function startMemoryWatchdog() {
+  _memoryWatchdog = setInterval(() => {
+    const rssMB = process.memoryUsage.rss() / 1024 / 1024
+    if (rssMB > MAX_RSS_MB) {
+      log(`RSS ${rssMB.toFixed(0)}MB exceeds cap ${MAX_RSS_MB}MB — restarting.`)
+      shutdown()
+    }
+  }, 30_000) // check every 30s
+  if (_memoryWatchdog.unref) _memoryWatchdog.unref()
+}
+
+// ---------------------------------------------------------------------------
 // HTTP server
 // ---------------------------------------------------------------------------
 const server = http.createServer(async (req, res) => {
@@ -488,9 +505,10 @@ server.listen(SOCKET_PATH, () => {
   log(`Model: ${MODEL}, dtype: ${DTYPE}, device: ${DEVICE}`)
   log(`Idle timeout: ${IDLE_TIMEOUT_MS / 60_000}min`)
 
-  // Start idle timer + socket watchdog
+  // Start idle timer + socket watchdog + memory watchdog
   resetIdleTimer()
   startSocketWatchdog()
+  startMemoryWatchdog()
 
   // Begin loading the model (async, non-blocking)
   loadPipeline()

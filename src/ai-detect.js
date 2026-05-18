@@ -351,6 +351,17 @@ async function ensureServer(aiConfig, debug) {
       return await waitForReady(aiConfig, debug)
     }
 
+    // Re-read config before spawning — if ai.enabled is false, bail out.
+    // This lets users disable AI without restarting opencode sessions.
+    try {
+      const cfgPath = path.join(os.homedir(), ".config", "opencode", "vibeguard.config.json")
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"))
+      if (cfg?.ai?.enabled === false) {
+        if (debug) _log("info", "AI disabled in config — not spawning server")
+        return false
+      }
+    } catch { /* config unreadable — proceed with spawn */ }
+
     // Clean up any stale files from a crashed server
     cleanupStaleFiles()
 
