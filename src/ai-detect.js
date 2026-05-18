@@ -16,6 +16,7 @@ import http from "node:http"
 import fs from "node:fs"
 import path from "node:path"
 import os from "node:os"
+import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
 import { spawn, execFileSync } from "node:child_process"
 
@@ -272,35 +273,42 @@ function spawnServer(aiConfig) {
     stderr = "ignore"
   }
 
-  const child = spawn(
-    nodeBin,
-    [
-      serverScript,
-      "--model",
-      model,
-      "--dtype",
-      dtype,
-      "--device",
-      device,
-      "--socket",
-      getSocketPath(),
-      "--idle-timeout",
-      String(IDLE_TIMEOUT_MS),
-    ],
-    {
-      detached: true,
-      stdio: ["ignore", stdout, stderr],
-      env: { ...process.env },
-    }
-  )
+  try {
+    const child = spawn(
+      nodeBin,
+      [
+        serverScript,
+        "--model",
+        model,
+        "--dtype",
+        dtype,
+        "--device",
+        device,
+        "--socket",
+        getSocketPath(),
+        "--idle-timeout",
+        String(IDLE_TIMEOUT_MS),
+      ],
+      {
+        detached: true,
+        stdio: ["ignore", stdout, stderr],
+        env: { ...process.env },
+      }
+    )
 
-  child.unref()
-  // Close the log fd in the parent — the child inherited a dup
-  if (logFd !== null) {
-    try { fs.closeSync(logFd) } catch { /* ok */ }
+    child.unref()
+    _log("info", `Spawned model server (pid=${child.pid}, node=${nodeBin}, model=${model}, dtype=${dtype})`)
+    return child.pid
+  } catch (err) {
+    _log("error", `spawn() failed: ${err.message}`)
+    return null
+  } finally {
+    // Close the log fd in the parent — the child inherited a dup.
+    // In a finally block so it's closed even if spawn() throws.
+    if (logFd !== null) {
+      try { fs.closeSync(logFd) } catch { /* ok */ }
+    }
   }
-  _log("info", `Spawned model server (pid=${child.pid}, node=${nodeBin}, model=${model}, dtype=${dtype})`)
-  return child.pid
 }
 
 /**
@@ -504,8 +512,10 @@ export async function isAIAvailable() {
       import.meta.resolve("@huggingface/transformers")
       return true
     }
-    // Fallback for runtimes that don't support import.meta.resolve
-    await import("@huggingface/transformers")
+    // Fallback for runtimes that don't support import.meta.resolve:
+    // use createRequire to do a path-only resolution (no module loading)
+    const require = createRequire(import.meta.url)
+    require.resolve("@huggingface/transformers")
     return true
   } catch {
     return false

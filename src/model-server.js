@@ -179,8 +179,8 @@ async function drainQueue() {
     }
   } finally {
     _inferring = false
-    // Process next in queue
-    if (_queue.length > 0) drainQueue()
+    // Process next in queue — use setImmediate to avoid recursive stack buildup
+    if (_queue.length > 0) setImmediate(drainQueue)
   }
 }
 
@@ -256,11 +256,23 @@ function resetIdleTimer() {
  */
 function startSocketWatchdog() {
   try {
-    _socketWatcher = fs.watch(path.dirname(SOCKET_PATH), (eventType, filename) => {
-      if (filename === path.basename(SOCKET_PATH) && !fs.existsSync(SOCKET_PATH)) {
-        log("Socket file deleted externally — exiting orphaned server.")
-        shutdown()
-      }
+    // Resolve symlinks — macOS $TMPDIR is often a symlink to /private/tmp
+    const watchDir = fs.realpathSync(path.dirname(SOCKET_PATH))
+    const socketBase = path.basename(SOCKET_PATH)
+    let debounceTimer = null
+
+    _socketWatcher = fs.watch(watchDir, (eventType, filename) => {
+      if (filename !== socketBase) return
+      // Debounce to avoid false positives from atomic rename operations
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null
+        if (!fs.existsSync(SOCKET_PATH)) {
+          log("Socket file deleted externally — exiting orphaned server.")
+          shutdown()
+        }
+      }, 150)
+      if (debounceTimer.unref) debounceTimer.unref()
     })
     _socketWatcher.unref()
   } catch {
@@ -365,8 +377,8 @@ const server = http.createServer(async (req, res) => {
 
       try {
         // NEVER log text — it contains the sensitive data we're protecting
-        _requestCount++
         const spans = await enqueueInference(text, categories)
+        _requestCount++
         log(`detect #${_requestCount}: ${spans.length} span(s) found`)
         res.writeHead(200, { "Content-Type": "application/json" })
         res.end(JSON.stringify({ spans }))
@@ -459,12 +471,15 @@ process.on("uncaughtException", (err) => {
   process.exit(1)
 })
 
-// Set socket permissions to 0600 after creation, write PID file after bind
+// Set restrictive umask before socket creation so the socket is never
+// world-accessible (avoids TOCTOU race between listen() and chmod).
+const prevUmask = process.umask(0o177) // creates files as 0o600
 server.listen(SOCKET_PATH, () => {
+  process.umask(prevUmask) // restore original umask
   try {
     fs.chmodSync(SOCKET_PATH, 0o600)
   } catch {
-    /* best-effort */
+    /* belt-and-suspenders — umask already handled it */
   }
   // Write PID file only after socket is bound (avoids race with other instances)
   fs.writeFileSync(PID_PATH, String(process.pid), "utf8")

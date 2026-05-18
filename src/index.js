@@ -39,6 +39,8 @@ export const VibeGuardPrivacy = async (ctx) => {
 
   const patterns = buildPatternSet(config.patterns)
   const sessions = new Map()
+  const sessionLastAccess = new Map() // track last access time for pruning
+  const MAX_SESSIONS = 50 // prune oldest when exceeded
   const aiConfig = config.ai
   const useAI = aiConfig.enabled
 
@@ -67,13 +69,32 @@ export const VibeGuardPrivacy = async (ctx) => {
     const key = String(sessionID ?? "")
     if (!key) return null
     const existing = sessions.get(key)
-    if (existing) return existing
+    if (existing) {
+      sessionLastAccess.set(key, Date.now())
+      return existing
+    }
+    // Prune oldest sessions if map is too large
+    if (sessions.size >= MAX_SESSIONS) {
+      let oldestKey = null
+      let oldestTime = Infinity
+      for (const [k, t] of sessionLastAccess) {
+        if (t < oldestTime) {
+          oldestTime = t
+          oldestKey = k
+        }
+      }
+      if (oldestKey) {
+        sessions.delete(oldestKey)
+        sessionLastAccess.delete(oldestKey)
+      }
+    }
     const created = new PlaceholderSession({
       prefix: config.prefix,
       ttlMs: config.ttlMs,
       maxMappings: config.maxMappings,
     })
     sessions.set(key, created)
+    sessionLastAccess.set(key, Date.now())
     return created
   }
 

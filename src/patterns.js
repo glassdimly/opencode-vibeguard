@@ -178,6 +178,42 @@ const BUILTIN = new Map([
       category: "BEARER_TOKEN",
     },
   ],
+  [
+    "npm_token",
+    {
+      // npm access tokens: npm_XXXXXXXXXXXXXXXXXXXX (36+ alphanumeric)
+      pattern: String.raw`npm_[A-Za-z0-9]{36,}`,
+      flags: "",
+      category: "NPM_TOKEN",
+    },
+  ],
+  [
+    "stripe_key",
+    {
+      // Stripe secret/publishable keys: sk_live_*, pk_live_*, sk_test_*, pk_test_*
+      pattern: String.raw`[sp]k_(?:live|test)_[A-Za-z0-9]{20,}`,
+      flags: "",
+      category: "STRIPE_KEY",
+    },
+  ],
+  [
+    "slack_webhook",
+    {
+      // Slack incoming webhook URLs
+      pattern: String.raw`https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+`,
+      flags: "",
+      category: "SLACK_WEBHOOK",
+    },
+  ],
+  [
+    "slack_token",
+    {
+      // Slack bot/user tokens: xoxb-*, xoxp-*, xoxs-*
+      pattern: String.raw`xox[bps]-[0-9]+-[A-Za-z0-9-]+`,
+      flags: "",
+      category: "SLACK_TOKEN",
+    },
+  ],
 ])
 
 export function buildPatternSet(patterns) {
@@ -207,7 +243,13 @@ export function buildPatternSet(patterns) {
     const category = sanitizeCategory(x.category)
     const flags = typeof x.flags === "string" ? x.flags : ""
     const peeled = peelInlineFlags(pattern, flags)
-    regexRules.push({ pattern: peeled.pattern, flags: peeled.flags, category })
+    const globalFlags = peeled.flags.includes("g") ? peeled.flags : `${peeled.flags}g`
+    regexRules.push({
+      pattern: peeled.pattern,
+      flags: peeled.flags,
+      category,
+      compiled: new RegExp(peeled.pattern, globalFlags),
+    })
   }
 
   for (const name of builtin) {
@@ -215,7 +257,13 @@ export function buildPatternSet(patterns) {
     if (!key) continue
     const rule = BUILTIN.get(key)
     if (!rule) continue
-    regexRules.push({ pattern: rule.pattern, flags: rule.flags, category: rule.category })
+    const globalFlags = rule.flags.includes("g") ? rule.flags : `${rule.flags}g`
+    regexRules.push({
+      pattern: rule.pattern,
+      flags: rule.flags,
+      category: rule.category,
+      compiled: new RegExp(rule.pattern, globalFlags),
+    })
   }
 
   const excludeSet = new Set(exclude.map((x) => String(x ?? "")))

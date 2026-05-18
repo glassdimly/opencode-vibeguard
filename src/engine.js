@@ -69,9 +69,10 @@ function findRegexSpans(text, patterns) {
   }
 
   for (const rule of patterns.regex) {
-    const baseFlags = String(rule.flags ?? "")
-    const flags = baseFlags.includes("g") ? baseFlags : `${baseFlags}g`
-    const re = new RegExp(rule.pattern, flags)
+    // Use pre-compiled regex if available, otherwise compile on the fly
+    const re = rule.compiled
+      ? (rule.compiled.lastIndex = 0, rule.compiled)
+      : new RegExp(rule.pattern, (rule.flags ?? "").includes("g") ? rule.flags : `${rule.flags ?? ""}g`)
     for (const m of text.matchAll(re)) {
       if (!m[0]) continue
       const start = m.index ?? -1
