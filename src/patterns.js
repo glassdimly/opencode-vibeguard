@@ -1,11 +1,4 @@
-function sanitizeCategory(input) {
-  const raw = String(input ?? "").trim()
-  if (!raw) return "TEXT"
-  const upper = raw.toUpperCase()
-  const safe = upper.replace(/[^A-Z0-9_]/g, "_").replace(/_+/g, "_")
-  if (!safe) return "TEXT"
-  return safe
-}
+import { sanitizeCategory } from "./util.js"
 
 /**
  * 将 Go 风格的 `(?i)` / `(?m)` 前缀做一个轻量兼容（仅处理“开头连续出现”的情况）。
