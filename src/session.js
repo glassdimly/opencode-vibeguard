@@ -128,8 +128,8 @@ export class PlaceholderSession {
         return candidate
       }
     }
-    // Exhausted collision slots — should never happen with HMAC-SHA256
-    return base
+    throw new Error(`vibeguard: placeholder collision limit exceeded for category "${category}"`)
+
   }
 }
 
